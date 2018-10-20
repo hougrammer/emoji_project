@@ -1,5 +1,3 @@
-# emoji_project
-
 ## Examining the Expressive Power of Emoji
 David Hou
 Michelle Cutler
@@ -14,12 +12,21 @@ We will leverage many existing emoji datasets, supplemented with data from Twitt
 
 ### References / Notes
 https://arxiv.org/pdf/1609.08359.pdf emoji2vec
+
 http://emojinet.knoesis.org/home.php emojinet
+
 https://arxiv.org/pdf/1707.04653.pdf Semantics based measure of emoji similarity
+
 http://www.aclweb.org/anthology/E17-2017 Are emojis predictable?
+
 http://www.aclweb.org/anthology/U16-1018 EDA of emoji translation of Moby Dick
+
 http://www.czyborra.com/unicode/emojidick.pdf PDF version of Emoji Dick
+
 http://aclweb.org/anthology/N18-2107 Multimodal emoji prediction (text + pictures)
+
 http://aclweb.org/anthology/S18-1003 Emoji prediction competition in English and Spanish
+
 https://www.aclweb.org/anthology/D14-1179 RNN encoder / decoder
+
 arXiv:1606.05908 Tutorial in Variational Autoencoders
