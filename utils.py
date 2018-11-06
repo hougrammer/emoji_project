@@ -13,8 +13,9 @@ def cosine_similarity(v1, v2):
     '''
     return 1 - scipy.spatial.distance.cosine(v1, v2)
 
-def display_emoji(unicode, size=28):
+def display_emoji(unicode, size=2):
     '''
     renders emoji in html
     '''
-    display(HTML('<p style="font-size: {}px">{}</p>'.format(size, chr(int(unicode[2:], 16)))))
+    display(HTML('<font size="+{}">{}</font>'.format(size, chr(int(unicode[2:], 16)))))
+    
