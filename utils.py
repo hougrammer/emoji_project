@@ -10,6 +10,8 @@ def cosine_similarity(v1, v2):
         v2: numeric iterable
     returns:
         (float) cosine similarity of the two vectors
+        
+    The cosine distance from scipy is 1 - uv/(uu + vv), so here, 1 cancels out and you get the similarity.
     '''
     return 1 - scipy.spatial.distance.cosine(v1, v2)
 
