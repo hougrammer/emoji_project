@@ -34,6 +34,7 @@ import time
 
 import numpy as np
 import tensorflow as tf
+import pandas as pd
 
 import tweet_reader
 import util
@@ -113,7 +114,7 @@ class Model(object):
         vocab_size = len(vocab)
         # Set up tensorflow look up from string word to unique integer
         vocab_lookup = tf.contrib.lookup.index_table_from_tensor(mapping=tf.constant(vocab),default_value=vocab_size)
-
+        id_to_vocab =  tf.contrib.lookup.index_to_string_table_from_tensor(mapping=tf.constant(vocab),default_value='UNK')
         string_tensor = vocab_lookup.lookup(input_.input_data)
 
         # define the word embedding
@@ -135,9 +136,6 @@ class Model(object):
 
         inputs = tf.nn.embedding_lookup(embedding, string_tensor)
 
-        #lo que necesito embedding = tf.get_variable("embedding", [vocab_size, size], dtype=data_type()) 
-                        #inputs = tf.nn.embedding_lookup(embedding, input_.input_data)
-
         fused_rnn_cell = tf.contrib.rnn.LSTMBlockFusedCell(config.hidden_size)
                 
         output, state = fused_rnn_cell(inputs, dtype=data_type())
@@ -150,7 +148,8 @@ class Model(object):
         #Reshape logits to be a 3-D tensor for sequence loss
         logits = tf.reshape(logits, [self.batch_size, self.num_steps, vocab_size])
         predictions = tf.placeholder(data_type(),[None, None],name="predictions")
-        predictions = tf.argmax(logits,axis=2) 
+        predictions = tf.argmax(logits,axis=2)
+        predictions = id_to_vocab.lookup(predictions)
         labels = vocab_lookup.lookup(input_.targets)
         
         # Use the contrib sequence loss and average over the batches
@@ -202,10 +201,6 @@ class Model(object):
         self._cost = tf.get_collection_ref(util.with_prefix(self._name, "cost"))[0]
         self._final_state = util.import_state_tuples(self._final_state, self._final_state_name)
     
-    def id_to_word(self,id):
-        tf.print(id)
-        return [x[0] for x in self.word_to_id.items() if x[1] == id][0]
-
     @property
     def input(self):
         return self._input
@@ -245,14 +240,7 @@ def get_config():
         raise ValueError("Invalid model: %s", FLAGS.model)
     return config                 
 
-def get_prediction(session, model, eval_op=None, verbose=False):
-    '''Gets a dictionary with the predicted word and its input'''
-    pass
-    #fetches = {
-     #   
-    #}
-
-def run_epoch(session, model, eval_op=None, verbose=False):
+def run_epoch(session, model, eval_op=None, verbose=False,save_csv=False):
     """Runs the model on the given data."""
     start_time = time.time()
     costs = 0.0
@@ -261,28 +249,37 @@ def run_epoch(session, model, eval_op=None, verbose=False):
     fetches = {
       "cost": model.cost,
       "final_state": model.final_state,
-      "predictions": model.predictions
+      "predictions": model.predictions,
+      "inputs": model.input.input_data
     }
     if eval_op is not None:
         fetches["eval_op"] = eval_op
-
+    
+    ins = []
+    preds = []
+    
     for step in range(model.input.epoch_size):
         feed_dict = {}
 
-    vals = session.run(fetches, feed_dict)
-    cost = vals["cost"]
-    state = vals["final_state"]
-    predictions = vals["predictions"]
-    print(predictions)
+        vals = session.run(fetches, feed_dict)
+        cost = vals["cost"]
+        state = vals["final_state"]
+        predictions = vals["predictions"]
+        inputs = vals["inputs"]
 
-    costs += cost
-    iters += model.input.num_steps
+        ins += list(inputs)
+        preds += list(predictions)
+        costs += cost
+        iters += model.input.num_steps
 
-    if verbose and step % (model.input.epoch_size // 10) == 10:
-        print("%.3f perplexity: %.3f speed: %.0f wps" %
-            (step * 1.0 / model.input.epoch_size, np.exp(costs / iters),
-             iters * model.input.batch_size /
-             (time.time() - start_time)))
+        if verbose and step % (model.input.epoch_size // 10) == 10:
+            print("%.3f perplexity: %.3f speed: %.0f wps" %
+                    (step * 1.0 / model.input.epoch_size, np.exp(costs / iters),
+                     iters * model.input.batch_size /
+                     (time.time() - start_time)))
+    if save_csv:
+        df = pd.DataFrame({'input':ins,'predictions':preds})
+        df.to_csv('inputs_and_preds.csv')
 
     return np.exp(costs / iters)
 
@@ -317,7 +314,7 @@ def main(_):
         test_input = Input(config=eval_config, data=test_data, name="TestInput")
         with tf.variable_scope("Model", reuse=True, initializer=initializer):
             mtest = Model(is_training=False, config=eval_config,input_=test_input,word_to_id=word_to_id_train)
-
+            
     models = {"Train": m, "Valid": mvalid, "Test": mtest}
     for name, model in models.items():
         model.export_ops(name)
@@ -338,7 +335,7 @@ def main(_):
             valid_perplexity = run_epoch(session, mvalid)
             print("Epoch: %d Valid Perplexity: %.3f" % (i + 1, valid_perplexity))
 
-        test_perplexity = run_epoch(session, mtest)
+        test_perplexity = run_epoch(session, mtest,save_csv=True)
         print("Test Perplexity: %.3f" % test_perplexity)
         
         
