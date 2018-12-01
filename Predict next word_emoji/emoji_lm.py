@@ -22,7 +22,7 @@ tf.contrib.rnn.LSTMBlockFusedCell
 
 To run:
 
-$ python emoji_lm.py --data_path=./
+$ python emoji_lm.py --data_path=./ --model=test
 
 """
 
@@ -41,50 +41,48 @@ import gensim
 
 from tensorflow.python.client import device_lib
 
-w2v = gensim.models.KeyedVectors.load_word2vec_format('../data/GoogleNews-vectors-negative300.bin', binary=True, limit=50000)
+w2v = gensim.models.KeyedVectors.load_word2vec_format('../data/GoogleNews-vectors-negative300.bin', binary=True, limit=10000)
 
 flags = tf.flags
 logging = tf.logging
 
 flags.DEFINE_string("model", "default","A type of model. Possible options are: default, test")
 flags.DEFINE_string("data_path", "./", "Where the training/test data is stored.")
-flags.DEFINE_string("save_path",'./simple-examples/models/',"Model output directory.")
+flags.DEFINE_string("save_path",'./checkpoints',"Model output directory.")
 flags.DEFINE_bool("use_fp16", True,"Train using 16-bit floats instead of 32bit floats")
 
 FLAGS = flags.FLAGS
 
 def data_type():
-    return tf.float16 if FLAGS.use_fp16 else tf.float32
+    return tf.float32 if FLAGS.use_fp16 else tf.float16 
 
 class DefConfig(object):
     """default config."""
     init_scale = 0.1 #This goes in the random uniform initializer
-    learning_rate = 1.0
-    max_grad_norm = 5 #the maximum permissible norm of the gradient
+    learning_rate = 1
+    max_grad_norm = 2 #the maximum permissible norm of the gradient
     num_layers = 2 
     num_steps = 20
-    hidden_size = 200
+    hidden_size = 8
     embedding_size = 300
-    max_epoch = 4
-    max_max_epoch = 13
-    lr_decay = 0.5 #the decay of the learning rate for each epoch after "max_epoch"
-    batch_size = 20 
-    vocab_size = None #it can be defined but the default is the length of the training vocabulary
+    max_epoch = 3
+    max_max_epoch = 5
+    lr_decay = 0.9 #the decay of the learning rate for each epoch after "max_epoch"
+    batch_size = 20
 
 class TestConfig(object):
     """Tiny config, for testing."""
     init_scale = 0.1 
-    learning_rate = 1.0
+    learning_rate = 1
     max_grad_norm = 1
     num_layers = 1
     num_steps = 2
     hidden_size = 2
     embedding_size = 300
-    max_epoch = 1
-    max_max_epoch = 1
+    max_epoch = 5
+    max_max_epoch = 5
     lr_decay = 0.5
     batch_size = 20
-    vocab_size = None
 
 class Input(object):
     """The input data."""
@@ -104,53 +102,61 @@ class Model(object):
         self.batch_size = input_.batch_size
         self.num_steps = input_.num_steps
         size = config.embedding_size
-        vocab_size = config.vocab_size #This is defined before in Main() if no input is provided.
         self.word_to_id = word_to_id
     
-        with tf.device("/cpu:0"):
             #based on https://stackoverflow.com/questions/45113130/how-to-add-new-embeddings-for-unknown-words-in-tensorflow-training-pre-set-fo
-            pretrained_vocab = list(w2v.vocab.keys())
-            pretrained_embs = w2v.vectors
-            train_vocab = list(self.word_to_id.keys())
-            only_in_train = list(set(train_vocab) - set(pretrained_vocab))
-            vocab = only_in_train + pretrained_vocab #First only in train so it keeps the same order that it had originally
+        pretrained_vocab = list(w2v.vocab.keys())
+        pretrained_embs = w2v.vectors
+        train_vocab = list(self.word_to_id.keys())
+        only_in_train = list(set(train_vocab) - set(pretrained_vocab))
+        vocab = only_in_train + pretrained_vocab #First only in train so it keeps the same order that it had originally
+        vocab_size = len(vocab)
+        # Set up tensorflow look up from string word to unique integer
+        vocab_lookup = tf.contrib.lookup.index_table_from_tensor(mapping=tf.constant(vocab),default_value=vocab_size)
 
-            # Set up tensorflow look up from string word to unique integer
-            vocab_lookup = tf.contrib.lookup.index_table_from_tensor(mapping=tf.constant(vocab),default_value=len(vocab))
-            string_tensor = vocab_lookup.lookup(tf.map_fn(self.id_to_word,input_.input_data))
+        string_tensor = vocab_lookup.lookup(input_.input_data)
 
-            # define the word embedding
-            pretrained_embs = tf.get_variable(
-              name="embs_pretrained",
-              initializer=tf.constant_initializer(np.asarray(pretrained_embs), dtype=tf.float32),
-              shape=pretrained_embs.shape,
-              trainable=False)
-            train_embeddings = tf.get_variable(
-              name="embs_only_in_train",
-              shape=[len(only_in_train), emb_size],
-              initializer=tf.random_uniform_initializer(-0.04, 0.04))
+        # define the word embedding
+        pretrained_embs = tf.get_variable(
+          name="embs_pretrained",
+          initializer=tf.constant_initializer(np.asarray(pretrained_embs), dtype=data_type()),
+          shape=pretrained_embs.shape,
+          trainable=False)
+        train_embeddings = tf.get_variable(
+          name="embs_only_in_train",
+          shape=[len(only_in_train), size],dtype=data_type())
+        unk_embedding = tf.get_variable(
+          name="unk_embedding",
+          shape=[1, size],
+          initializer=tf.random_uniform_initializer(-0.04, 0.04),
+          trainable=False)
+        
+        embedding = tf.Variable(tf.concat([pretrained_embs, train_embeddings, unk_embedding], axis=0, name="concat_embs"))
 
-            embedding = tf.concat([pretrained_embs, train_embeddings], axis=0)
+        inputs = tf.nn.embedding_lookup(embedding, string_tensor)
 
-            inputs = tf.nn.embedding_lookup(embeddings, string_tensor)
-
-            #lo que necesito embedding = tf.get_variable("embedding", [vocab_size, size], dtype=data_type()) 
-                            #inputs = tf.nn.embedding_lookup(embedding, input_.input_data)
+        #lo que necesito embedding = tf.get_variable("embedding", [vocab_size, size], dtype=data_type()) 
+                        #inputs = tf.nn.embedding_lookup(embedding, input_.input_data)
 
         fused_rnn_cell = tf.contrib.rnn.LSTMBlockFusedCell(config.hidden_size)
-
-        output, state = fused_rnn_cell(inputs, dtype=tf.float32)
-
-        softmax_w = tf.get_variable("softmax_w", [size, vocab_size], dtype=data_type())
+                
+        output, state = fused_rnn_cell(inputs, dtype=data_type())
+        output = tf.reshape(output, [-1, config.hidden_size]) #reshape to 2d for matmul
+        
+        softmax_w = tf.get_variable("softmax_w", [config.hidden_size, vocab_size], dtype=data_type())
         softmax_b = tf.get_variable("softmax_b", [vocab_size], dtype=data_type())
+        
         logits = tf.nn.xw_plus_b(output, softmax_w, softmax_b)
         #Reshape logits to be a 3-D tensor for sequence loss
         logits = tf.reshape(logits, [self.batch_size, self.num_steps, vocab_size])
-
+        predictions = tf.placeholder(data_type(),[None, None],name="predictions")
+        predictions = tf.argmax(logits,axis=2) 
+        labels = vocab_lookup.lookup(input_.targets)
+        
         # Use the contrib sequence loss and average over the batches
         loss = tf.contrib.seq2seq.sequence_loss(
             logits,
-            input_.targets,
+            labels,
             tf.ones([self.batch_size, self.num_steps], dtype=data_type()),
             average_across_timesteps=False,
             average_across_batch=True)
@@ -158,7 +164,8 @@ class Model(object):
         # Update the cost
         self._cost = tf.reduce_sum(loss)
         self._final_state = state
-
+        self._predictions = predictions
+        
         if not is_training:
             return
 
@@ -168,7 +175,7 @@ class Model(object):
         optimizer  = tf.train.AdamOptimizer(self._lr)
         self._train_op = optimizer.apply_gradients(zip(grads, tvars),global_step=tf.train.get_or_create_global_step())
 
-        self._new_lr = tf.placeholder(tf.float32, shape=[], name="new_learning_rate")
+        self._new_lr = tf.placeholder(data_type(), shape=[], name="new_learning_rate")
         self._lr_update = tf.assign(self._lr, self._new_lr)
     
     def assign_lr(self, session, lr_value):
@@ -182,9 +189,7 @@ class Model(object):
             ops.update(lr=self._lr, new_lr=self._new_lr, lr_update=self._lr_update)
         for name, op in ops.items():
             tf.add_to_collection(name, op)
-        self._initial_state_name = util.with_prefix(self._name, "initial")
         self._final_state_name = util.with_prefix(self._name, "final")
-        util.export_state_tuples(self._initial_state, self._initial_state_name)
         util.export_state_tuples(self._final_state, self._final_state_name)
 
     def import_ops(self):
@@ -194,13 +199,8 @@ class Model(object):
             self._lr = tf.get_collection_ref("lr")[0]
             self._new_lr = tf.get_collection_ref("new_lr")[0]
             self._lr_update = tf.get_collection_ref("lr_update")[0]
-            rnn_params = tf.get_collection_ref("rnn_params")
         self._cost = tf.get_collection_ref(util.with_prefix(self._name, "cost"))[0]
-        num_replicas = FLAGS.num_gpus if self._name == "Train" else 1
-        self._initial_state = util.import_state_tuples(
-        self._initial_state, self._initial_state_name, num_replicas)
-        self._final_state = util.import_state_tuples(
-        self._final_state, self._final_state_name, num_replicas)
+        self._final_state = util.import_state_tuples(self._final_state, self._final_state_name)
     
     def id_to_word(self,id):
         tf.print(id)
@@ -209,10 +209,6 @@ class Model(object):
     @property
     def input(self):
         return self._input
-
-    @property
-    def initial_state(self):
-        return self._initial_state
 
     @property
     def cost(self):
@@ -231,13 +227,13 @@ class Model(object):
         return self._train_op
 
     @property
-    def initial_state_name(self):
-        return self._initial_state_name
-
-    @property
     def final_state_name(self):
         return self._final_state_name
-                 
+
+    @property
+    def predictions(self):
+        return self._predictions
+
 def get_config():
     """Get model config."""
     config = None
@@ -249,6 +245,47 @@ def get_config():
         raise ValueError("Invalid model: %s", FLAGS.model)
     return config                 
 
+def get_prediction(session, model, eval_op=None, verbose=False):
+    '''Gets a dictionary with the predicted word and its input'''
+    pass
+    #fetches = {
+     #   
+    #}
+
+def run_epoch(session, model, eval_op=None, verbose=False):
+    """Runs the model on the given data."""
+    start_time = time.time()
+    costs = 0.0
+    iters = 0
+    
+    fetches = {
+      "cost": model.cost,
+      "final_state": model.final_state,
+      "predictions": model.predictions
+    }
+    if eval_op is not None:
+        fetches["eval_op"] = eval_op
+
+    for step in range(model.input.epoch_size):
+        feed_dict = {}
+
+    vals = session.run(fetches, feed_dict)
+    cost = vals["cost"]
+    state = vals["final_state"]
+    predictions = vals["predictions"]
+    print(predictions)
+
+    costs += cost
+    iters += model.input.num_steps
+
+    if verbose and step % (model.input.epoch_size // 10) == 10:
+        print("%.3f perplexity: %.3f speed: %.0f wps" %
+            (step * 1.0 / model.input.epoch_size, np.exp(costs / iters),
+             iters * model.input.batch_size /
+             (time.time() - start_time)))
+
+    return np.exp(costs / iters)
+
 def main(_):
     if not FLAGS.data_path:
         raise ValueError("Must set --data_path to data directory")
@@ -258,8 +295,8 @@ def main(_):
     eval_config.batch_size = 1
     eval_config.num_steps = 1
                  
-    train_data, valid_data, test_data, config.vocab_size, word_to_id_train = tweet_reader.tweets_raw_data(FLAGS.data_path)
-    
+    train_data, valid_data, test_data, word_to_id_train = tweet_reader.tweets_raw_data(FLAGS.data_path)
+        
     with tf.Graph().as_default():
         initializer = tf.random_uniform_initializer(-config.init_scale,config.init_scale)
     
@@ -273,13 +310,13 @@ def main(_):
     with tf.name_scope("Valid"):
         valid_input = Input(config=config, data=valid_data, name="ValidInput")
         with tf.variable_scope("Model", reuse=True, initializer=initializer):
-            mvalid = Model(is_training=False, config=config, input_=valid_input)
+            mvalid = Model(is_training=False, config=config, input_=valid_input, word_to_id=word_to_id_train)
             tf.summary.scalar("Validation Loss", mvalid.cost)
 
     with tf.name_scope("Test"):
         test_input = Input(config=eval_config, data=test_data, name="TestInput")
         with tf.variable_scope("Model", reuse=True, initializer=initializer):
-            mtest = Model(is_training=False, config=eval_config,input_=test_input)
+            mtest = Model(is_training=False, config=eval_config,input_=test_input,word_to_id=word_to_id_train)
 
     models = {"Train": m, "Valid": mvalid, "Test": mtest}
     for name, model in models.items():
@@ -290,9 +327,7 @@ def main(_):
         tf.train.import_meta_graph(metagraph)
     for model in models.values():
         model.import_ops()
-        sv = tf.train.Supervisor(logdir=FLAGS.save_path)
-        config_proto = tf.ConfigProto(allow_soft_placement=soft_placement)
-    with sv.managed_session(config=config_proto) as session:
+    with tf.train.MonitoredTrainingSession(checkpoint_dir=FLAGS.save_path) as session:
         for i in range(config.max_max_epoch):
             lr_decay = config.lr_decay ** max(i + 1 - config.max_epoch, 0.0)
             m.assign_lr(session, config.learning_rate * lr_decay)
@@ -305,10 +340,8 @@ def main(_):
 
         test_perplexity = run_epoch(session, mtest)
         print("Test Perplexity: %.3f" % test_perplexity)
-
-        print("Saving model to %s." % FLAGS.save_path)
-        sv.saver.save(session, FLAGS.save_path, global_step=sv.global_step)
-
-
+        
+        
+        
 if __name__ == "__main__":
     tf.app.run()

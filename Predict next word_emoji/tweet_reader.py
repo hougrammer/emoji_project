@@ -43,7 +43,7 @@ def _build_vocab(filename):
 
 def _file_to_word_ids(filename, word_to_id):
     data = _read_words(filename)
-    return [word_to_id[word] for word in data if word in word_to_id]
+    return [word for word in data if word in word_to_id]
 
 def tweets_raw_data(data_path = None):
     train_path = os.path.join(data_path, "train.csv")
@@ -54,7 +54,7 @@ def tweets_raw_data(data_path = None):
     valid_data = _file_to_word_ids(valid_path, word_to_id)
     test_data = _file_to_word_ids(test_path, word_to_id)
     vocabulary_length = len(word_to_id)
-    return train_data, valid_data, test_data, vocabulary_length, word_to_id
+    return train_data, valid_data, test_data, word_to_id
 
 def tw_producer(raw_data, batch_size, num_steps, name=None):
     '''  Returns:
@@ -62,7 +62,7 @@ def tw_producer(raw_data, batch_size, num_steps, name=None):
     of the tuple is the same data time-shifted to the right by one.'''
 
     with tf.name_scope(name, "tw_producer", [raw_data, batch_size, num_steps]):
-        raw_data = tf.convert_to_tensor(raw_data, name="raw_data", dtype=tf.int32)
+        raw_data = tf.convert_to_tensor(raw_data, name="raw_data", dtype=tf.string)
         
         data_len = tf.size(raw_data)
         batch_len = data_len // batch_size
@@ -79,6 +79,3 @@ def tw_producer(raw_data, batch_size, num_steps, name=None):
         y.set_shape([batch_size, num_steps])
         
         return x, y
-
-
-    

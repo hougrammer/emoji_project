@@ -25,19 +25,14 @@ from tensorflow.core.protobuf import rewriter_config_pb2
 FLAGS = tf.flags.FLAGS
 
 
-def export_state_tuples(state_tuples, name):
-  for state_tuple in state_tuples:
+def export_state_tuples(state_tuple, name):
     tf.add_to_collection(name, state_tuple.c)
     tf.add_to_collection(name, state_tuple.h)
 
-
-def import_state_tuples(state_tuples, name, num_replicas):
-  restored = []
-  for i in range(len(state_tuples) * num_replicas):
-    c = tf.get_collection_ref(name)[2 * i + 0]
-    h = tf.get_collection_ref(name)[2 * i + 1]
-    restored.append(tf.contrib.rnn.LSTMStateTuple(c, h))
-  return tuple(restored)
+def import_state_tuples(state_tuple, name):
+    c = tf.get_collection_ref(name)
+    h = tf.get_collection_ref(name)
+    return tf.contrib.rnn.LSTMStateTuple(c, h)
 
 
 def with_prefix(prefix, name):
@@ -86,11 +81,11 @@ class UpdateCollection(object):
 
 
 def auto_parallel(metagraph, model):
-  from tensorflow.python.grappler import tf_optimizer
-  rewriter_config = rewriter_config_pb2.RewriterConfig()
-  rewriter_config.optimizers.append("autoparallel")
-  rewriter_config.auto_parallel.enable = True
-  rewriter_config.auto_parallel.num_replicas = FLAGS.num_gpus
-  optimized_graph = tf_optimizer.OptimizeGraph(rewriter_config, metagraph)
-  metagraph.graph_def.CopyFrom(optimized_graph)
-  UpdateCollection(metagraph, model)
+    from tensorflow.python.grappler import tf_optimizer
+    rewriter_config = rewriter_config_pb2.RewriterConfig()
+    rewriter_config.optimizers.append("autoparallel")
+    rewriter_config.auto_parallel.enable = True
+    rewriter_config.auto_parallel.num_replicas = FLAGS.num_gpus
+    optimized_graph = tf_optimizer.OptimizeGraph(rewriter_config, metagraph)
+    metagraph.graph_def.CopyFrom(optimized_graph)
+    UpdateCollection(metagraph, model)
