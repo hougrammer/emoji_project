@@ -37,3 +37,12 @@ def matmul3d(X, W):
     XWr = tf.matmul(Xr, W)
     newshape = [tf.shape(X)[0], tf.shape(X)[1], tf.shape(W)[1]]
     return tf.reshape(XWr, newshape)
+
+def batch_generator(X, batch_size):
+    '''
+    basic batch generator
+    '''
+    i = 0
+    while i < len(X):
+        yield X[i:i+batch_size]
+        i += batch_size
