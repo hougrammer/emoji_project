@@ -16,11 +16,34 @@ def cosine_similarity(v1, v2):
     '''
     return 1 - scipy.spatial.distance.cosine(v1, v2)
 
+def cosine_distance(v1, v2):
+    '''
+    args:
+        v1: numeric iterable
+        v2: numeric iterable
+    returns:
+        (float) cosine distance of the two vectors
+    '''
+    return scipy.spatial.distance.cosine(v1, v2)
+
 def display_emoji(unicode, size=2):
     '''
     renders emoji in html
     '''
     display(HTML('<font size="+{}">{}</font>'.format(size, chr(int(unicode[2:], 16)))))
+
+def get_similar_tokens(vector, target_embed, n=1):
+    '''
+    Searches target_embed for vectors most similar to vector using cosine_similarity.
+    args:
+        (array) vector: vector of word/emoji
+        (dict) target_embed: embedding of emoji/word
+    returns:
+        (int) index of most similar emoji if n == 1
+        (list) index of most similar emoji if n > 1
+    '''
+    items = sorted(target_embed.items(), key=lambda x: cosine_distance(vector, x[1]))
+    return items[0] if n == 1 else items[:n]
     
 def matmul3d(X, W):
     """Wrapper for tf.matmul to handle a 3D input tensor X.
